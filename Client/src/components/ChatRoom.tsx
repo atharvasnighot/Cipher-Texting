@@ -1,8 +1,15 @@
-import React, { useState, ChangeEvent } from 'react';
+import React, { ChangeEvent, useEffect, useState } from 'react';
+import { w3cwebsocket as W3CWebSocket,IMessageEvent } from 'websocket';
+
+interface ChatMessage {
+  senderName: string;
+  message: string;
+  status: string;
+}
 
 const ChatRoom: React.FC = () => {
-  const [privateChats, setPrivateChats] = useState(new Map<string, { senderName: string; message: string }[]>());
-  const [publicChats, setPublicChats] = useState<{ senderName: string; message: string }[]>([]);
+  const [privateChats, setPrivateChats] = useState<Map<string, ChatMessage[]>>(new Map());
+  const [publicChats, setPublicChats] = useState<ChatMessage[]>([]);
   const [tab, setTab] = useState<string>('CHATROOM');
   const [userData, setUserData] = useState({
     username: '',
@@ -11,19 +18,79 @@ const ChatRoom: React.FC = () => {
     message: '',
   });
 
+  useEffect(() => {
+    console.log(userData);
+  }, [userData]);
+
+  let socket: W3CWebSocket | null = null;
+
+  const connect = () => {
+    socket = new W3CWebSocket('ws://localhost:8080/ws');
+
+    socket.onopen = () => {
+      setUserData({ ...userData, connected: true });
+      userJoin();
+    };
+
+    socket.onmessage = (event: IMessageEvent) => {
+      const payloadData: ChatMessage = JSON.parse(event.data.toString());
+      switch (payloadData.status) {
+        case 'JOIN':
+          if (!privateChats.get(payloadData.senderName)) {
+            privateChats.set(payloadData.senderName, []);
+            setPrivateChats(new Map(privateChats));
+          }
+          break;
+        case 'MESSAGE':
+          if (payloadData.senderName === 'CHATROOM') {
+            setPublicChats((prevPublicChats) => [...prevPublicChats, payloadData]);
+          } else {
+            setPrivateChats((prevChats) => {
+              const updatedChats = new Map(prevChats);
+              if (updatedChats.has(payloadData.senderName)) {
+                updatedChats.get(payloadData.senderName)?.push(payloadData);
+              } else {
+                updatedChats.set(payloadData.senderName, [payloadData]);
+              }
+              return updatedChats;
+            });
+          }
+          break;
+      }
+    };
+
+    socket.onclose = (event) => {
+      console.log('Connection closed:', event);
+      setUserData({ ...userData, connected: false });
+    };
+  };
+
+  const userJoin = () => {
+    if (socket) {
+      const chatMessage: ChatMessage = {
+        senderName: userData.username,
+        status: 'JOIN',
+        message: '',
+      };
+      socket.send(JSON.stringify(chatMessage));
+    }
+  };
+
   const handleMessage = (event: ChangeEvent<HTMLInputElement>) => {
     const { value } = event.target;
     setUserData((prevUserData) => ({ ...prevUserData, message: value }));
   };
 
   const sendValue = () => {
-    // Add logic for sending public messages
-    setUserData((prevUserData) => ({ ...prevUserData, message: '' }));
-  };
-
-  const sendPrivateValue = () => {
-    // Add logic for sending private messages
-    setUserData((prevUserData) => ({ ...prevUserData, message: '' }));
+    if (socket) {
+      const chatMessage: ChatMessage = {
+        senderName: userData.username,
+        message: userData.message,
+        status: 'MESSAGE',
+      };
+      socket.send(JSON.stringify(chatMessage));
+      setUserData({ ...userData, message: '' });
+    }
   };
 
   const handleUsername = (event: ChangeEvent<HTMLInputElement>) => {
@@ -32,8 +99,7 @@ const ChatRoom: React.FC = () => {
   };
 
   const registerUser = () => {
-    // Add logic for connecting to the chat
-    setUserData((prevUserData) => ({ ...prevUserData, connected: true }));
+    connect();
   };
 
   return (
@@ -52,7 +118,7 @@ const ChatRoom: React.FC = () => {
               ))}
             </ul>
           </div>
-          {tab === 'CHATROOM' ? (
+          {tab === 'CHATROOM' && (
             <div className="chat-content">
               <ul className="chat-messages">
                 {publicChats.map((chat, index) => (
@@ -68,16 +134,17 @@ const ChatRoom: React.FC = () => {
                 <input
                   type="text"
                   className="input-message"
-                  placeholder="enter the message"
+                  placeholder="Enter the message"
                   value={userData.message}
                   onChange={handleMessage}
                 />
                 <button type="button" className="send-button" onClick={sendValue}>
-                  send
+                  Send
                 </button>
               </div>
             </div>
-          ) : (
+          )}
+          {tab !== 'CHATROOM' && (
             <div className="chat-content">
               <ul className="chat-messages">
                 {[...(privateChats.get(tab) || [])].map((chat, index) => (
@@ -93,12 +160,12 @@ const ChatRoom: React.FC = () => {
                 <input
                   type="text"
                   className="input-message"
-                  placeholder="enter the message"
+                  placeholder="Enter the message"
                   value={userData.message}
                   onChange={handleMessage}
                 />
-                <button type="button" className="send-button" onClick={sendPrivateValue}>
-                  send
+                <button type="button" className="send-button" onClick={sendValue}>
+                  Send
                 </button>
               </div>
             </div>
@@ -114,7 +181,7 @@ const ChatRoom: React.FC = () => {
             onChange={handleUsername}
           />
           <button type="button" onClick={registerUser}>
-            connect
+            Connect
           </button>
         </div>
       )}
