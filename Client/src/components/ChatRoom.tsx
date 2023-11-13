@@ -1,5 +1,6 @@
-import React, { ChangeEvent, useEffect, useState } from 'react';
-import { w3cwebsocket as W3CWebSocket,IMessageEvent } from 'websocket';
+import { ChangeEvent, useEffect, useState } from 'react';
+import { io, Socket } from 'socket.io-client';
+
 
 interface ChatMessage {
   senderName: string;
@@ -7,7 +8,7 @@ interface ChatMessage {
   status: string;
 }
 
-const ChatRoom: React.FC = () => {
+const ChatRoom = () => {
   const [privateChats, setPrivateChats] = useState<Map<string, ChatMessage[]>>(new Map());
   const [publicChats, setPublicChats] = useState<ChatMessage[]>([]);
   const [tab, setTab] = useState<string>('CHATROOM');
@@ -22,18 +23,17 @@ const ChatRoom: React.FC = () => {
     console.log(userData);
   }, [userData]);
 
-  let socket: W3CWebSocket | null = null;
+  let socket:Socket | null = null;
 
   const connect = () => {
-    socket = new W3CWebSocket('ws://localhost:8080/ws');
+    socket = io('http://localhost:8080');
 
-    socket.onopen = () => {
+    socket.on('connect', () => {
       setUserData({ ...userData, connected: true });
       userJoin();
-    };
+    });
 
-    socket.onmessage = (event: IMessageEvent) => {
-      const payloadData: ChatMessage = JSON.parse(event.data.toString());
+    socket.on('message', (payloadData: ChatMessage) => {
       switch (payloadData.status) {
         case 'JOIN':
           if (!privateChats.get(payloadData.senderName)) {
@@ -57,12 +57,12 @@ const ChatRoom: React.FC = () => {
           }
           break;
       }
-    };
+    });
 
-    socket.onclose = (event) => {
-      console.log('Connection closed:', event);
+    socket.on('disconnect', (reason:string) => {
+      console.log('Connection closed:', reason);
       setUserData({ ...userData, connected: false });
-    };
+    });
   };
 
   const userJoin = () => {
@@ -72,7 +72,7 @@ const ChatRoom: React.FC = () => {
         status: 'JOIN',
         message: '',
       };
-      socket.send(JSON.stringify(chatMessage));
+      socket.emit('message', chatMessage);
     }
   };
 
@@ -88,7 +88,7 @@ const ChatRoom: React.FC = () => {
         message: userData.message,
         status: 'MESSAGE',
       };
-      socket.send(JSON.stringify(chatMessage));
+      socket.emit('message', chatMessage);
       setUserData({ ...userData, message: '' });
     }
   };
